@@ -61,7 +61,8 @@ void log(int type, char *s1, char *s2, int num) {
 void web(int fd, int hit) {
 	int j;
 	int buflen;
-	char *fstr;
+	int len;
+	char *fstr; // fstr is used for "Content-Type:" 
 	long ret;
 	static char buffer[BUFSIZE];
 	
@@ -105,9 +106,54 @@ void web(int fd, int hit) {
 	buflen = strlen(buffer);
 	fstr = (char *)0;
 
+	// now check wether the file extension in the request is legal
 	for (i = 0; extension[i].ext != 0; i++) {
+		len = strlen(extension[i].ext);
+		if(!strncmp(&buffer[buflen-len], extension[i].ext, len)) { // ok, if it is a legal extension
+			fstr = extension[i].filetype;
+			break;
+		}
+	}
+
+	if(fstr ==0) 
+		log(SORRY, "file extension type not supported", buffer, fd);
+
+	// open the file for reading, don't worry, this is a '\0' after the URL
+	if((file_fd = open(&buffer[5], O_RDONLY)) == -1)
+		log(SORRY, "failed to open file", &buffer[5], fd);
+
+
+	// now let's log a legal request
+	log(LOG, "SEND", &buffer[5], hit);
+
+	// we just prepared the http header
+	(void)sprintf(buffer, "HTTP/1.0 200 OK\r\nContent-Type: %s\r\n\r\n", fstr);
+
+	// we send the buffer to the client
+	(void)write(fd, buffer, strlen(buffer));
+
+
+	// now we send the body of the http response, let's say, maybe a picture
+	while((ret = read( file_fd, buffer, BUFSIZE)) > 0) 
+		(void)write(fd, buffer,ret);
+
+
+#ifdef LINUX
+	sleep(1);	// to allow socket to drain
+#endif
+
+	exit(1);
+}
 
 	
+int main(int argc, char **argv) {
+
+
+
+
+
+
+
 
 
 
