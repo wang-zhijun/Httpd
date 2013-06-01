@@ -147,12 +147,27 @@ void web(int fd, int hit) {
 
 	
 int main(int argc, char **argv) {
+	int i;
+	static struct sockaddr_in cli_addr; // static = initialised to zeros
+	static struct sockaddr_in serv_addr; 
 
 
-
-
-
-
+	if ( argc < 3 || argc > 3 || !strcmp(argv[1], "-?")) {
+		(void)printf("hint: nweb Port-Number Top-Directory\n\n"
+					 "\tnweb is a small and very safe mini web server\n"
+					 "\tnweb only serves out file/web pages with extensions named below\n"
+					 "\t and only from the named directory or its  sub-directories.\n"
+					 "\tThere is no fancy features = safe and secure.\n\n"
+					 "\tExample: nweb 8181 /home/nwebdir &\n\n"
+					 "\tOnly Supports:");
+		for (i = 0; extension[i].ext != 0; i++)
+			(void)printf(" %s", extensions[i].ext);
+		
+		(void)printf("\n\tNot Supported: URLs including \"..\", Java, javascript, CGI\n"
+					 "\t Not Supported: directories / /etc /bin /lib /tmp /usr /dev /sbin \n"
+					 "\t No warranty given or implied\n\tWang Zhijun madfrogme@gmail.com\n");
+		exit(0);
+	}
 
 
 
