@@ -30,7 +30,7 @@ struct {
 		{ "html", "text/html" },
 		{ 0, 0} };
 
-void log(int type, char *s1, char *s2, int num) { 
+void Log(int type, char *s1, char *s2, int num) { 
 	int fd;
 	char logbuffer[BUFSIZE*2];
 
@@ -41,7 +41,7 @@ void log(int type, char *s1, char *s2, int num) {
 		case SORRY:
 			(void)sprintf(logbuffer, "<HTML><BODY><H1>nweb Web Server Sorry: %s %s</H1></BODY></HTML>\r\n", s1,s2);
 			(void)write(num,logbuffer,strlen(logbuffer));
-			(void)sprintf(lobbuffer,"SORRY: %s:%s",s1,s2);
+			(void)sprintf(logbuffer,"SORRY: %s:%s",s1,s2);
 			break;
 		case LOG:
 			(void)sprintf(logbuffer, "INFO, %s:%s:%d", s1,s2,num);
@@ -59,7 +59,7 @@ void log(int type, char *s1, char *s2, int num) {
 
 /* child web server process, so we can exit on errors */
 void web(int fd, int hit) {
-	int j;
+	int i, j, file_fd;
 	int buflen;
 	int len;
 	char *fstr; // fstr is used for "Content-Type:" 
@@ -69,7 +69,7 @@ void web(int fd, int hit) {
 	ret = read(fd, buffer, BUFSIZE);
 
 	if (ret == 0 || ret == -1) 	/* read failure, stop now */
-		log(SORRY, "failed to read browser request", fd);
+		Log(SORRY, "failed to read browser request","", fd);
 
 	if (ret > 0 && ret < BUFSIZE)
 		buffer[ret] = '\0'; /* terminate the buffer */
@@ -80,14 +80,14 @@ void web(int fd, int hit) {
 		if(buffer[i] == '\r' || buffer[i] == '\n')
 			buffer[i] = '*'; // WTF is this mean
 	
-	log(LOG, "request", buffer, hit);
+	Log(LOG, "request", buffer, hit);
 
 	/* now, let us theck the 'GET' or 'get' command */
 	if(strncmp(buffer, "GET ", 4) && strncmp(buffer, "get ", 4)) // no 'get ' or 'GET ' in buffer if true
-		log(SORRY, "Only simple GET operation supported", buffer, fd);
+		Log(SORRY, "Only simple GET operation supported", buffer, fd);
 
 
-	for (i = 4; i < BUFSIZE, i++) { /* null terminate after the second space to ignore extra stuff */
+	for (i = 4; i < BUFSIZE; i++) { /* null terminate after the second space to ignore extra stuff */
 		if (buffer[i] == ' ') {
 			buffer[i] = '\0'; // terminate the request after URL
 			break;
@@ -97,7 +97,7 @@ void web(int fd, int hit) {
 	/* check for illegal parent directory use .. */
 	for (j = 0; j < i-1; j++) 
 		if(buffer[j] == '.' && buffer[j+1] == '.')
-			log(SORRY, "Parent directory (..) path names not supported", buffer, fd);
+			Log(SORRY, "Parent directory (..) path names not supported", buffer, fd);
 
 
 	if(!strncmp(&buffer[0], "GET /\0", 6) || !strncmp(&buffer[0], "get /\0", 6) )
@@ -116,15 +116,15 @@ void web(int fd, int hit) {
 	}
 
 	if(fstr ==0) 
-		log(SORRY, "file extension type not supported", buffer, fd);
+		Log(SORRY, "file extension type not supported", buffer, fd);
 
 	// open the file for reading, don't worry, this is a '\0' after the URL
 	if((file_fd = open(&buffer[5], O_RDONLY)) == -1)
-		log(SORRY, "failed to open file", &buffer[5], fd);
+		Log(SORRY, "failed to open file", &buffer[5], fd);
 
 
 	// now let's log a legal request
-	log(LOG, "SEND", &buffer[5], hit);
+	Log(LOG, "SEND", &buffer[5], hit);
 
 	// we just prepared the http header
 	(void)sprintf(buffer, "HTTP/1.0 200 OK\r\nContent-Type: %s\r\n\r\n", fstr);
@@ -147,7 +147,12 @@ void web(int fd, int hit) {
 
 	
 int main(int argc, char **argv) {
-	int i;
+	int i, hit;
+	int listenfd,sockfd,  port;
+	pid_t pid;
+	size_t length;
+	char *str;
+
 	static struct sockaddr_in cli_addr; // static = initialised to zeros
 	static struct sockaddr_in serv_addr; 
 
@@ -161,7 +166,7 @@ int main(int argc, char **argv) {
 					 "\tExample: nweb 8181 /home/nwebdir &\n\n"
 					 "\tOnly Supports:");
 		for (i = 0; extension[i].ext != 0; i++)
-			(void)printf(" %s", extensions[i].ext);
+			(void)printf(" %s", extension[i].ext);
 		
 		(void)printf("\n\tNot Supported: URLs including \"..\", Java, javascript, CGI\n"
 					 "\t Not Supported: directories / /etc /bin /lib /tmp /usr /dev /sbin \n"
@@ -169,6 +174,73 @@ int main(int argc, char **argv) {
 		exit(0);
 	}
 
+	if(!strncmp(argv[2], "/", 2) || !strncmp(argv[2], "/etc", 5) || !strncmp(argv[2], "/bin", 5) || \
+	   !strncmp(argv[2], "/lib", 5) || !strncmp(argv[2], "/tmp", 5) || !strncmp(argv[2], "/usr", 5) ||  \
+	   !strncmp(argv[2], "/dev", 5) || !strncmp(argv[2], "/sbin", 6)) { 
+		(void)printf("ERROR: Bad top directory %s, see nweb -?\n", argv[2]);
+		exit(3);
+	}
+
+	// change to the directory containing contents
+	if(chdir(argv[2]) == -1) {
+		(void)printf("ERROR: Can't Change to directory %s\n", argv[2]);
+		exit(4);
+	}
+
+	if(fork() != 0)
+		return 0; // parent returns OK to shell
+
+	(void)signal(SIGCLD, SIG_IGN); // ignore child death
+	(void)signal(SIGHUP, SIG_IGN);
+
+	for(i = 0; i < 32; i++) 
+		(void)close(i); // close open files
+
+	(void)setpgrp(); // break away from process group
+
+	// child process just become the leader of a new created group
+	Log(LOG, "nweb starting", argv[1], getpid());
+
+	// setup the network socket
+	if((listenfd = socket(AF_INET, SOCK_STREAM, 0)) < 0)
+		Log(ERROR, "system call", "socket", 0);
+
+	port = atoi(argv[1]);
+
+	if(port < 0 || port > 60000) 
+		Log(ERROR, "Invalid port number(try 1-60000)", argv[1], 0);
 
 
+	serv_addr.sin_family = AF_INET;
+	serv_addr.sin_addr.s_addr = htonl(INADDR_ANY);
+	serv_addr.sin_port = htons(port);
+
+	if(bind(listenfd, (struct sockaddr *)&serv_addr, sizeof(serv_addr)))
+		Log(ERROR, "system call", "bind", 0);
+
+	if(listen(listenfd, 64) < 0)
+		Log(ERROR, "system call", "listen", 0);
+
+	for(hit = 1; ; hit++) {
+		length = sizeof(cli_addr);
+
+		if((sockfd = accept(listenfd, (struct sockaddr *)&cli_addr, &length)) < 0)
+			Log(ERROR, "system call", "accept", 0);
+
+
+		if ((pid = fork()) < 0)
+			Log(ERROR, "system call", "fork", 0);
+
+		else {
+			if (pid == 0) { //child process
+				(void)close(listenfd);
+				web(sockfd, hit);
+			}
+			else {
+				(void)close(sockfd);
+			}
+		}
+	}
+
+}
 
